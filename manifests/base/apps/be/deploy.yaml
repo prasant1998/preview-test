@@ -1,0 +1,70 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: laravel
+  labels:
+    app: laravel
+spec:
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 2
+      maxUnavailable: 0
+  replicas: 1
+  selector:
+    matchLabels:
+      app: laravel
+  template:
+    metadata:
+      labels:
+        app: laravel
+    spec:
+      containers:
+        - name: laravel
+          image: image_url/laravel-preview-backend 
+          env:
+            - name: DB_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: moco-preview-sql
+                  key: ADMIN_PASSWORD    
+          envFrom:
+            - configMapRef:
+                name: laravel-env-cm
+            - secretRef:
+                name: laravel-env-sec
+          
+          command: ['/bin/bash', '-c', 'chmod +x ./docker/entrypoint.sh; ./docker/entrypoint.sh;']
+          ports:
+            - containerPort: 80
+              name: http-laravel              
+          # readinessProbe:
+          #   httpGet:
+          #     path: /
+          #     port: 80
+          #   initialDelaySeconds: 30
+          #   periodSeconds: 5
+          #   timeoutSeconds: 2
+          #   failureThreshold: 10
+          # livenessProbe:
+          #   httpGet:
+          #     path: /
+          #     port: 80
+          #   initialDelaySeconds: 30
+          #   periodSeconds: 5
+          #   timeoutSeconds: 2
+          #   failureThreshold: 10            
+          resources:
+            requests:
+              cpu: "50m"
+              memory: "128Mi"
+            limits:
+              cpu: "250m"
+              memory: "1024Mi"
+          #securityContext:
+          #  runAsUser: 82
+          #  runAsGroup: 82
+      initContainers:
+      - name: init-mysql
+        image: busybox
+        command: ['sh', '-c', 'until nslookup moco-preview-sql-primary; do echo waiting for moco-preview-sql-primary; sleep 2; done;']    

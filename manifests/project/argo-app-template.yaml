@@ -1,0 +1,26 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: pr-7780
+  namespace: argocd
+spec:
+  project: rimsys-dev
+  source:
+    repoURL: 'https://github.com/Rimsys/gitops.git'
+    path: deployments/apps/preview/preview-env/deploy-preview-env-pr-7780
+    targetRevision: deploy-preview
+    directory:
+      recurse: false
+      jsonnet: {}
+  destination:
+    namespace: pr-7780
+    name: rimsys-eks-dev
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+      allowEmpty: true
+    syncOptions:
+      - CreateNamespace=true
+
+#-pr-1a356d8e40cb4471f9eff0d6df33ad0aae8a7c96

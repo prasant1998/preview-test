@@ -1,0 +1,9 @@
+apiVersion: v1
+kind: Secret
+metadata:
+  name: laravel-env-sec
+type: Opaque
+stringData:
+  AMAZON_ACCOUNT_ID: "389132740677"
+  # DB_PASSWORD: root_password
+  DB_USERNAME: moco-admin

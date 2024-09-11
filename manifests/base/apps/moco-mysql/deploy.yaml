@@ -1,0 +1,34 @@
+apiVersion: moco.cybozu.com/v1beta1
+kind: MySQLCluster
+metadata:
+  name: preview-sql
+spec:
+  # The number of instances in a cluster.  Choose 1, 3, or 5.
+  # You can increase the number afterwards.
+  replicas: 1
+  podTemplate:
+    spec:
+      containers:
+      # Define a container named "mysqld".
+      # You may include other containers or field settings.
+      - name: mysqld
+        # Image for "mysqld" should include a helper program called `moco-init`.
+        # Pre-built images are available on https://quay.io/repository/cybozu/mysql?tag=latest&tab=tags
+        # You can also build your own image.  See https://cybozu-go.github.io/moco/custom-mysqld.html
+        image: quay.io/cybozu/mysql:8.0.25  
+
+      # The above image is run as UID=10000 GID=10000.
+      # If the volume created from the below volumeClaimTemplates does not allow writes to this UID/GID,
+      # set `securityContext.fsGroup` to 10000 as follows.
+      securityContext:
+        fsGroup: 10000
+  volumeClaimTemplates:
+  # At least a PVC named "mysql-data" must be defined.
+  - metadata:
+      name: mysql-data
+    spec:
+      accessModes: [ "ReadWriteOnce" ]
+      storageClassName: gp3
+      resources:
+        requests:
+          storage: 10Gi

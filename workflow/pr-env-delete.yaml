@@ -1,0 +1,135 @@
+name: Delete PR Env Created
+
+on:
+  pull_request:
+    types:
+      - closed
+    branches:
+      - '*'
+jobs:
+  merge_job:
+    # this job will only run if the PR has been merged
+    if: (github.event.pull_request.merged == true && startsWith( github.event.pull_request.head.ref, 'pr'))
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out code
+        uses: actions/checkout@v3
+      - name: Get Pr Id
+        run: echo "PR_ID=$(echo ${{ github.event.number }})" >> $GITHUB_ENV
+      - name: Get App Id
+        run: echo "APP_ID=pr-$(echo ${{ env.PR_ID }})" >> $GITHUB_ENV
+      - name: Checkout GitOps to delete new PR APP
+        uses: actions/checkout@v3
+        with:
+          repository: test/gitops
+          path: ./gitops
+          ref: deploy-preview
+          token: ${{ secrets.test_REPO_PAT }}
+      - name: Deleting the app for the closed PR.
+        run: |
+          cd gitops
+          git config --global user.email "devops@io"
+          git config --global user.name "test-devops"
+          rm -rf ./project/pr-argo-apps/preview-${{ env.APP_ID }}.yaml
+
+          git add .
+          git commit -m "Deleted the app with the closed ${{ env.APP_ID }}"
+          git push origin deploy-preview
+
+      - name: Deleting the manifest directory
+        run: |
+          cd gitops
+          git config --global user.email "devops@io"
+          git config --global user.name "test-devops"
+          rm -rf ./deployments/apps/preview/preview-env/deploy-preview-env-${{ env.APP_ID }}
+
+          git add .
+          git commit -m "Deleted manifest directory with the closed ${{ env.APP_ID }}"
+          git push origin deploy-preview
+
+      - name: Adding namespace manifest file for deletion
+        run: |
+          cd gitops
+          git config --global user.email "devops@test.io"
+          git config --global user.name "test-devops"
+          cp ./pr-delete/pr-delete-job.yaml ./pr-delete/delete-namespace/preview-${{ env.APP_ID }}.yaml
+          sed -i "s/delete-ns-job.*/delete-ns-job-${{ env.APP_ID }}/g" ./pr-delete/delete-namespace/preview-${{ env.APP_ID }}.yaml
+          sed -i "s/preview-pr-.*/preview-${{ env.APP_ID }}/g" ./pr-delete/delete-namespace/preview-${{ env.APP_ID }}.yaml
+
+          git add .
+          git commit -m "Adding namespace manifest file for deletion for a new ${{ env.APP_ID }}"
+          git push origin deploy-preview
+
+      - name: Completion message
+        uses: actions/github-script@v4
+        with:
+          script: |
+            github.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: `${{ env.APP_ID }} has been merged`
+            });
+  close_job:
+    # this job will only run if the PR has been closed without being merged
+    if: (github.event.pull_request.merged == false && startsWith( github.event.pull_request.head.ref, 'pr'))
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out code
+        uses: actions/checkout@v3
+      - name: Get Pr Id
+        run: echo "PR_ID=$(echo ${{ github.event.number }})" >> $GITHUB_ENV
+      - name: Get App Id
+        run: echo "APP_ID=pr-$(echo ${{ env.PR_ID }})" >> $GITHUB_ENV
+      - name: Checkout GitOps to delete new PR APP
+        uses: actions/checkout@v3
+        with:
+          repository: test/gitops
+          path: ./gitops
+          ref: deploy-preview
+          token: ${{ secrets.test_REPO_PAT }}
+      - name: Deleting the app for the closed PR.
+        run: |
+          cd gitops
+          git config --global user.email "test@test.io"
+          git config --global user.name "test-devops"
+          rm -rf ./project/pr-argo-apps/preview-${{ env.APP_ID }}.yaml
+
+          git add .
+          git commit -m "Deleted the app with the closed ${{ env.APP_ID }}"
+          git push origin deploy-preview
+      - name: Deleting the manifest directory
+        run: |
+          cd gitops
+          git config --global user.email "devops@test.io"
+          git config --global user.name "test-devops"
+          rm -rf ./deployments/apps/preview/preview-env/deploy-preview-env-${{ env.APP_ID }}
+
+          git add .
+          git commit -m "Deleted manifest directory with the closed ${{ env.APP_ID }}"
+          git push origin deploy-preview
+
+      - name: Adding namespace manifest file for deletion
+        run: |
+          cd gitops
+          git config --global user.email "devops@test.io"
+          git config --global user.name "test-devops"
+          cp -r ./pr-delete/pr-delete-job.yaml ./pr-delete/delete-namespace/preview-${{ env.APP_ID }}.yaml
+          sed -i "s/pr-.*/${{ env.APP_ID }}/g" ./pr-delete/delete-namespace/preview-${{ env.APP_ID }}.yaml
+          sed -i "s/preview-pr-.*/preview-${{ env.APP_ID }}/g" ./pr-delete/delete-namespace/preview-${{ env.APP_ID }}.yaml
+
+          git add .
+          git commit -m "Adding namespace manifest file for deletion for a new ${{ env.APP_ID }}"
+          git push origin deploy-preview
+
+      - name: Completion message
+        uses: actions/github-script@v4
+        with:
+          script: |
+            github.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: `${{ env.APP_ID }} has been closed without being merged`
+            });

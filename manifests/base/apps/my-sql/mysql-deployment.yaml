@@ -1,0 +1,46 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: my-sql
+  labels:
+    app: my-sql
+spec:
+  strategy:
+    type: Recreate
+  replicas: 1
+  selector:
+    matchLabels:
+      app: my-sql
+  template:
+    metadata:
+      labels:
+        app: my-sql
+    spec:
+      containers:
+        - name: my-sql
+          image: mysql:8.0
+          imagePullPolicy: Always        
+          env:
+            - name: MYSQL_ROOT_PASSWORD
+              value: NJkhdHHf8
+            - name: MYSQL_DATABASE
+              value: rimsys
+            - name: MYSQL_USER 
+              value: root
+            - name: MYSQL_PASSWORD
+              value: NJkhdHHf9
+            - name: MYSQL_HOST
+              value: my-sql
+          volumeMounts:
+            - name: my-sql-pvc-preview-pr-7974
+              mountPath: /var/lib/mysql
+          ports:
+            - containerPort: 3306
+              name: http-my-sql
+      volumes:
+      - name: my-sql-pvc-preview-pr-7974
+        persistentVolumeClaim:
+          claimName: my-sql-pv-claim-preview-pr-7974
+              
+
+

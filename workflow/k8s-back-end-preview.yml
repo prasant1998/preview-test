@@ -1,0 +1,159 @@
+#build and push backend-preview
+name: Build & Push Back-End Preview
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+    branches:
+      - '*'
+
+jobs:
+  comment:
+    if: startsWith( github.event.pull_request.head.ref, 'pr')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/github-script@v5
+        with:
+          github-token: ${{ secrets.test_REPO_PAT }}
+          script: |
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: '👋 Hey! Environment will be ready to use in 40 mins! Here is the url https://pr-${{ github.event.number }}-preview.dev'
+            })
+  build:
+    if: startsWith( github.event.pull_request.head.ref, 'pr')
+    name: Build Image
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out code
+        uses: actions/checkout@v3
+
+      - name: Get Branch prefix-neat
+        run: echo "BRANCH_PREFIX_N=$(echo $GITHUB_REF_NAME)" >> $GITHUB_ENV
+
+      - name: Get Branch prefix
+        run: echo "BRANCH_PREFIX=$(echo $GITHUB_REF_NAME | cut -d "-" -f-2)" >> $GITHUB_ENV
+
+      - name: Get Branch prefix preview
+        run: echo "BRANCH_PREFIX_PREVIEW=$(echo ${{ github.event.pull_request.head.ref }} | cut -d "/" -f-1)" >> $GITHUB_ENV
+
+      - name: Get Pr Id
+        run: echo "PR_ID=$(echo ${{ github.event.number }})" >> $GITHUB_ENV
+
+      - name: Get App Id
+        run: echo "APP_ID=pr-$(echo ${{ env.PR_ID }})" >> $GITHUB_ENV
+
+
+      - name: Set Env Branch
+        run: |
+          if [ ${{ env.BRANCH_PREFIX_PREVIEW }} == 'preview' ]; then
+            echo "DEST_BRANCH=deploy-preview" >> $GITHUB_ENV
+            echo $GITHUB_REF_NAME
+            echo ${{ github.base_ref }}
+            echo ${{ github.GITHUB_REF }}
+            echo ${{ github.event.number }}
+            echo ${{ github.event.pull_request.head.ref }}
+            echo ${{ github.head_ref }}
+          elif [ $GITHUB_REF_NAME == 'preview*' && ${{ github.event.release.tag_name }} != '' ]; then
+            #deploy preview branches with tags to preview
+            echo "DEST_BRANCH=deploy-preview" >> $GITHUB_ENV
+          else
+            echo "Not a valid environment"
+            exit 1;
+          fi
+
+      - name: Checkout GitOps to create a new PR branch
+        uses: actions/checkout@v3
+        with:
+          repository: test/gitops
+          path: ./gitops
+          ref: deploy-preview
+          token: ${{ secrets.test_REPO_PAT }}
+
+      - name: Creating a new app for a new PR
+        run: |
+          cd gitops
+          git config --global user.email "devops@io"
+          git config --global user.name "devops"
+          cp ./project/argo-app-template.yaml ./project/pr-argo-apps/preview-${{ env.APP_ID }}.yaml
+          sed -i "s/deploy-preview-env-pr-.*/deploy-preview-env-${{ env.APP_ID }}/g" ./project/pr-argo-apps/${{ env.APP_ID }}.yaml
+          sed -i "s/pr-.*/${{ env.APP_ID }}/g" ./project/pr-argo-apps/preview-${{ env.APP_ID }}.yaml
+          sed -i "s/#-pr-.*/#-pr-${{ github.sha }}/g" ./project/pr-argo-apps/preview-${{ env.APP_ID }}.yaml
+          sed -i "s/#-pr-.*/#-pr-${{ github.sha }}/g" ./project/argo-app-template.yaml
+          mkdir -p ./deployments/apps/preview/preview-env/deploy-preview-env-${{ env.APP_ID }}
+          cp ./deployments/apps/preview/deploy-preview-env-template/* ./deployments/apps/preview/preview-env/deploy-preview-env-${{ env.APP_ID }}/
+
+          git add .
+          git commit -m "Deploying a new app for a new ${{ env.APP_ID }}"
+          git push origin deploy-preview
+
+      - name: Checkout GitOps
+        uses: actions/checkout@v3
+        with:
+          repository: test/gitops
+          path: ./gitops
+          ref: ${{ env.DEST_BRANCH }}
+          token: ${{ secrets.REPO_PAT }}
+
+      - name: Get Customer name
+        run: |
+          if [ ${{ env.BRANCH_PREFIX_PREVIEW }} == 'preview' ]; then
+            #set customer as preview for preview branches with tags
+            echo "CUSTOMER_NAME=preview" >> $GITHUB_ENV
+          else
+            echo "Not a valid customer"
+            exit 1;
+          fi
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v1
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: us-east-1
+
+      - name: Login to Amazon ECR Private
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v1
+
+      - name: Creating Sqs
+        run: |
+          aws sqs create-queue --queue-name k8s_preview-dev
+
+      - name: Build, tag, and push docker image to Amazon ECR for Back-end
+        id: image_build
+        env:
+          REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+          REPOSITORY: laravel-preview-backend
+          IMAGE_TAG: ${{ github.sha }}
+        run: |
+          docker build -t $REGISTRY/$REPOSITORY:$IMAGE_TAG -f dockerfiles/back-end_preview.Dockerfile .
+          docker push $REGISTRY/$REPOSITORY:$IMAGE_TAG
+          sed -Ei "/\-\ name\:\ 389132740677\.dkr\.ecr\.us\-east\-1\.amazonaws\.com\/laravel\-preview\-backend$/{n;s/\w+$/$IMAGE_TAG/}" ./gitops/deployments/apps/${{ env.CUSTOMER_NAME }}/preview-env/deploy-preview-env-${{ env.APP_ID }}/kustomization.yaml
+
+          sed -i "s/rim-pr-.*/rim-${{ env.APP_ID }}-preview.test.dev/g" ./gitops/deployments/apps/${{ env.CUSTOMER_NAME }}/preview-env/deploy-preview-env-${{ env.APP_ID }}/be-cm.yaml
+          sed -i "s/rim-api-pr-.*/rim-api-${{ env.APP_ID }}-preview.test.dev/g" ./gitops/deployments/apps/${{ env.CUSTOMER_NAME }}/preview-env/deploy-preview-env-${{ env.APP_ID }}/be-cm.yaml
+          sed -i "s/pr_.*/${{ env.DB_NAME }}/g" ./gitops/deployments/apps/${{ env.CUSTOMER_NAME }}/preview-env/deploy-preview-env-${{ env.APP_ID }}/be-cm.yaml
+          sed -i "s/rim-api-pr-.*/rim-api-${{ env.APP_ID }}-preview.test.dev/g" ./gitops/deployments/apps/${{ env.CUSTOMER_NAME }}/preview-env/deploy-preview-env-${{ env.APP_ID }}/be-ingress.yaml
+          sed -i "s/rim-api-pr-.*/rim-api-${{ env.APP_ID }}-preview.test.dev/g" ./gitops/deployments/apps/${{ env.CUSTOMER_NAME }}/preview-env/deploy-preview-env-${{ env.APP_ID }}/fe-cm.yaml
+          sed -i "s/rim-pr-.*/rim-${{ env.APP_ID }}-preview.test.dev/g" ./gitops/deployments/apps/${{ env.CUSTOMER_NAME }}/preview-env/deploy-preview-env-${{ env.APP_ID }}/fe-ingress.yaml
+          sed -i "s/pr-.*/${{ env.APP_ID }}/g" ./gitops/deployments/apps/${{ env.CUSTOMER_NAME }}/preview-env/deploy-preview-env-${{ env.APP_ID }}/kustomization.yaml
+
+      - name: Deploy latests
+        run: |
+          cd gitops
+          git config --global user.email "devops@io"
+          git config --global user.name "devops"
+          git add deployments/apps/${{ env.CUSTOMER_NAME }}/preview-env/deploy-preview-env-${{ env.APP_ID }}/kustomization.yaml
+          git add deployments/apps/${{ env.CUSTOMER_NAME }}/preview-env/deploy-preview-env-${{ env.APP_ID }}/be-cm.yaml
+          git add deployments/apps/${{ env.CUSTOMER_NAME }}/preview-env/deploy-preview-env-${{ env.APP_ID }}/be-ingress.yaml
+          git add deployments/apps/${{ env.CUSTOMER_NAME }}/preview-env/deploy-preview-env-${{ env.APP_ID }}/fe-cm.yaml
+          git add deployments/apps/${{ env.CUSTOMER_NAME }}/preview-env/deploy-preview-env-${{ env.APP_ID }}/fe-ingress.yaml
+          git commit -m "Deploying latest image"
+          parallel --retries 10 --delay 3 ::: "git pull --rebase && git push origin ${{ env.DEST_BRANCH }} --force"
+
+        if: steps.image_build.outcome == 'success'
+

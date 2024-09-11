@@ -1,0 +1,15 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: fume
+  labels:
+    app: fume
+spec:
+  type: ClusterIP
+  ports:
+  - name: http-fume
+    port: 3000
+    protocol: TCP
+    targetPort: 3000
+  selector:
+    app: fume

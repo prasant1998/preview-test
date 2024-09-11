@@ -1,0 +1,29 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: preview-pr-1234
+spec:
+  template:
+    spec:
+      containers:
+      - name: pr-1234
+        image: ubuntu:latest
+        command: ["/bin/bash", "-c"]
+        args:
+        - >-
+           apt-get update -y &&
+           apt install curl unzip ca-certificates apt-transport-https -y &&
+           curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip" &&
+           unzip awscliv2.zip &&
+           ./aws/install &&
+           aws configure set aws_access_key_id "AKIAVVGQ6NBCVYPECANS" &&
+           aws configure set aws_secret_access_key "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" &&
+           aws configure set default.region "us-east-1" &&
+           aws configure set default.output json &&
+           aws eks update-kubeconfig --region us-east-1 --name test-eks-dev &&
+           curl -fsSLo /usr/share/keyrings/kubernetes-archive-keyring.gpg https://packages.cloud.google.com/apt/doc/apt-key.gpg &&
+           echo "deb [signed-by=/usr/share/keyrings/kubernetes-archive-keyring.gpg] https://apt.kubernetes.io/ kubernetes-xenial main" | tee /etc/apt/sources.list.d/kubernetes.list &&
+           apt-get update -y &&
+           apt-get install -y kubectl &&
+           kubectl delete namespace pr-1234
+      restartPolicy: Never

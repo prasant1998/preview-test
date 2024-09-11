@@ -1,0 +1,112 @@
+#build backend
+name: Build & Push Front-End Preview
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+    branches:
+      - '*'
+
+jobs:
+  build:
+    if: startsWith( github.event.pull_request.head.ref, 'pr')
+    name: Build Image
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out code
+        uses: actions/checkout@v3
+
+      - name: Get Branch prefix
+        run: echo "BRANCH_PREFIX=$(echo $GITHUB_REF_NAME | cut -d "-" -f-2)" >> $GITHUB_ENV
+
+      - name: Get Branch prefix preview
+        run: echo "BRANCH_PREFIX_PREVIEW=$(echo ${{ github.event.pull_request.head.ref }} | cut -d "/" -f-1)" >> $GITHUB_ENV
+
+      - name: Get Pr Id
+        run: echo "PR_ID=$(echo ${{ github.event.number }})" >> $GITHUB_ENV
+
+      - name: Get App Id
+        run: echo "APP_ID=pr-$(echo ${{ env.PR_ID }})" >> $GITHUB_ENV
+
+      - name: Set Env Branch
+        run: |
+          if [ ${{ env.BRANCH_PREFIX_PREVIEW }} == 'preview' ]; then
+            echo "DEST_BRANCH=deploy-preview" >> $GITHUB_ENV
+          elif [ $GITHUB_REF_NAME == 'preview*' && ${{ github.event.release.tag_name }} != '' ]; then
+            #deploy preview branches with tags to preview
+            echo "DEST_BRANCH=deploy-preview" >> $GITHUB_ENV
+          else
+            echo "Not a valid environment"
+            exit 1;
+          fi
+      - name: Sleep for 6 minute
+        run: sleep 360s
+        shell: bash
+
+
+      - name: Checkout GitOps
+        uses: actions/checkout@v3
+        with:
+          repository: test/gitops
+          path: ./gitops
+          ref: ${{ env.DEST_BRANCH }}
+          token: ${{ secrets.test_REPO_PAT }}
+
+      - name: Get Customer name
+        run: |
+          if [ ${{ env.BRANCH_PREFIX_PREVIEW }} == 'preview' ]; then
+            #set customer as preview for preview branches with tags
+            echo "CUSTOMER_NAME=preview" >> $GITHUB_ENV
+          else
+            echo "Not a valid customer"
+            exit 1;
+          fi
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v1
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: us-east-1
+
+      - name: Login to Amazon ECR Private
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v1
+
+      - name: Build, tag, and push docker image to Amazon ECR for front-end
+        id: image_build
+        env:
+          REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+          REPOSITORY: fume-preview-frontend
+          IMAGE_TAG: ${{ github.sha }}
+        run: |
+          docker build -t $REGISTRY/$REPOSITORY:$IMAGE_TAG -f dockerfiles/front-end.Dockerfile .
+          docker push $REGISTRY/$REPOSITORY:$IMAGE_TAG
+          sed -Ei "/\-\ name\:\ 389132740677\.dkr\.ecr\.us\-east\-1\.amazonaws\.com\/fume\-preview\-frontend$/{n;s/\w+$/$IMAGE_TAG/}" ./gitops/deployments/apps/${{ env.CUSTOMER_NAME }}/preview-env/deploy-preview-env-${{ env.APP_ID }}/kustomization.yaml
+
+
+      - name: Deploy latest
+        run: |
+          cd gitops
+          git config --global user.email "devops@test.io"
+          git config --global user.name "test-devops"
+          git add deployments/apps/${{ env.CUSTOMER_NAME }}/preview-env/deploy-preview-env-${{ env.APP_ID }}/kustomization.yaml
+          git commit -m "Deploying latest image"
+          parallel --retries 10 --delay 3 ::: "git pull --rebase && git push origin ${{ env.DEST_BRANCH }}"
+        if: steps.image_build.outcome == 'success'
+
+      - name: Sleep for 10 minute
+        run: sleep 600s
+        shell: bash
+
+      - name: Completion message
+        uses: actions/github-script@v4
+        with:
+          script: |
+            github.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: `${{ env.APP_ID }} has been deployed and is ready to use.`
+            });

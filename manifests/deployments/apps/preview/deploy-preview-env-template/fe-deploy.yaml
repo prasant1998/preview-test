@@ -1,0 +1,9 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: fume
+# spec:
+#   template:
+#     spec:
+#       nodeSelector:
+#         alpha.eksctl.io/nodegroup-name: test-eks-dev-mng-pub01
